@@ -10,7 +10,7 @@ foreach ($r in $reports) {
 }
 $header = "| Setup | " + ($labels -join " | ") + " |"
 $sep = "|---|" + (($labels | ForEach-Object { "---:" }) -join "|") + "|"
-"### Memory, whole browser (private MB · processes)"
+"### Memory, whole browser (private MB · working set MB · processes)"
 ""
 $header
 $sep
@@ -19,7 +19,7 @@ foreach ($r in $reports) {
   $name = $r.BaseName -replace '^bench-', ''
   $cells = foreach ($l in $labels) {
     $s = $j.samples | Where-Object { $_.label -eq $l } | Select-Object -First 1
-    if ($s) { "{0:N0} · {1}" -f $s.privateMB, $s.processes } else { "–" }
+    if ($s) { "{0:N0} · {1:N0} · {2}" -f $s.privateMB, $s.workingSetMB, $s.processes } else { "–" }
   }
   "| $name ($($j.engine)) | " + ($cells -join " | ") + " |"
 }

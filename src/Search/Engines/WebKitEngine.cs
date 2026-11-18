@@ -73,6 +73,16 @@ sealed class WebKitEngine : IEngine
         WK.WKPreferencesSetPageCacheEnabled(Preferences, !s.Lean);
         WK.WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled(Preferences, true);
         WK.WKPreferencesSetHiddenPageDOMTimerThrottlingAutoIncreases(Preferences, true);
+        if (s.Lean)
+        {
+            // GPU compositing keeps a texture per layer, per page, in the GPU
+            // process. Drawn in software instead, as Playwright's own Windows
+            // shell can: less memory, a little less smooth.
+            WK.WKPreferencesSetAcceleratedCompositingEnabled(Preferences, false);
+            WK.WKPreferencesSetAccelerated2DCanvasEnabled(Preferences, false);
+            WK.WKPreferencesSetAcceleratedDrawingEnabled(Preferences, false);
+        }
+        Trace.Log("webkit: lean " + s.Lean);
 
         parkingSource = new HwndSource(new HwndSourceParameters("Search parking") { Width = 1, Height = 1, WindowStyle = unchecked((int)0x80000000) /* WS_POPUP */ });
         Parking = parkingSource.Handle;
@@ -167,6 +177,9 @@ sealed class WebKitEngine : IEngine
     {
         WK.WKUserContentControllerRemoveAllUserScripts(page.Controller);
         var all = DocumentScripts().ToList();
+        // This build may not compile content rules at all: then the ad
+        // blocker is the page-level part only (empty ad slots hidden).
+        if (shield == IntPtr.Zero && Browser.Settings.ShieldOn) all.Add(Shield.CosmeticScript(Browser.Settings.ShieldPaused));
         if (page.Owner != null && !page.Owner.Private) all.AddRange(extensions.ContentScripts());
         foreach (var source in all)
         {
@@ -192,8 +205,10 @@ sealed class WebKitEngine : IEngine
             var compiled = await Compile("search-shield", ContentRules.Shield(paused));
             if (compiled != IntPtr.Zero) shield = compiled;
         }
-        foreach (var p in Pages) Filters(p);
+        foreach (var p in Pages) { Filters(p); Scripts(p); }
     }
+
+    public bool RulesAvailable => shield != IntPtr.Zero;
 
     /// WebKit's content rule compiler, as a task: the compiled list, or nothing.
     internal unsafe Task<IntPtr> Compile(string id, string json)

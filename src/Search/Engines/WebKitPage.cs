@@ -264,52 +264,69 @@ sealed class WebKitPage : IPage
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static unsafe void KeyNotHandled(IntPtr page, WK.MSG* msg, IntPtr info)
     {
-        var p = From(info);
-        if (msg == null) return;
-        var main = new WindowInteropHelper(p.engine.Browser).Handle;
-        WK.PostMessage(main, msg->message, msg->wParam, msg->lParam);
+        try
+        {
+            var p = From(info);
+            if (msg == null) return;
+            var main = new WindowInteropHelper(p.engine.Browser).Handle;
+            WK.PostMessage(main, msg->message, msg->wParam, msg->lParam);
+        }
+        catch (Exception e) { Trace.Log("callback KeyNotHandled threw: " + e.Message); }
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void Alert(IntPtr page, IntPtr text, IntPtr frame, IntPtr origin, IntPtr listener, IntPtr info)
     {
-        var p = From(info);
-        MessageBox.Show(p.engine.Browser, WK.Read(text), Address.WithoutWww(HostOf(p.Url)), MessageBoxButton.OK);
-        WK.WKPageRunJavaScriptAlertResultListenerCall(listener);
+        Safe("Alert", () =>
+        {
+            var p = From(info);
+            MessageBox.Show(p.engine.Browser, WK.Read(text), Address.WithoutWww(HostOf(p.Url)), MessageBoxButton.OK);
+            WK.WKPageRunJavaScriptAlertResultListenerCall(listener);
+        });
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void Confirm(IntPtr page, IntPtr text, IntPtr frame, IntPtr origin, IntPtr listener, IntPtr info)
     {
-        var p = From(info);
-        var ok = MessageBox.Show(p.engine.Browser, WK.Read(text), Address.WithoutWww(HostOf(p.Url)), MessageBoxButton.OKCancel) == MessageBoxResult.OK;
-        WK.WKPageRunJavaScriptConfirmResultListenerCall(listener, ok);
+        Safe("Confirm", () =>
+        {
+            var p = From(info);
+            var ok = MessageBox.Show(p.engine.Browser, WK.Read(text), Address.WithoutWww(HostOf(p.Url)), MessageBoxButton.OKCancel) == MessageBoxResult.OK;
+            WK.WKPageRunJavaScriptConfirmResultListenerCall(listener, ok);
+        });
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void PromptFor(IntPtr page, IntPtr text, IntPtr defaultValue, IntPtr frame, IntPtr origin, IntPtr listener, IntPtr info)
     {
-        var p = From(info);
-        var answer = Prompt.Ask(p.engine.Browser, WK.Read(text), WK.Read(defaultValue));
-        var s = answer == null ? IntPtr.Zero : WK.Str(answer);
-        WK.WKPageRunJavaScriptPromptResultListenerCall(listener, s);
-        if (s != IntPtr.Zero) WK.WKRelease(s);
+        Safe("PromptFor", () =>
+        {
+            var p = From(info);
+            var answer = Prompt.Ask(p.engine.Browser, WK.Read(text), WK.Read(defaultValue));
+            var s = answer == null ? IntPtr.Zero : WK.Str(answer);
+            WK.WKPageRunJavaScriptPromptResultListenerCall(listener, s);
+            if (s != IntPtr.Zero) WK.WKRelease(s);
+        });
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static unsafe void OpenPanel(IntPtr page, IntPtr frame, IntPtr parameters, IntPtr listener, IntPtr info)
     {
-        var p = From(info);
-        var pick = new Microsoft.Win32.OpenFileDialog { Multiselect = WK.WKOpenPanelParametersGetAllowsMultipleFiles(parameters) };
-        if (pick.ShowDialog(p.engine.Browser) != true) { WK.WKOpenPanelResultListenerCancel(listener); return; }
-        var urls = pick.FileNames.Select(f => WK.Url(new Uri(f).AbsoluteUri)).ToArray();
-        fixed (IntPtr* u = urls)
+        try
         {
-            var array = WK.WKArrayCreate(u, (nuint)urls.Length);
-            WK.WKOpenPanelResultListenerChooseFiles(listener, array, IntPtr.Zero);
-            WK.WKRelease(array);
+            var p = From(info);
+            var pick = new Microsoft.Win32.OpenFileDialog { Multiselect = WK.WKOpenPanelParametersGetAllowsMultipleFiles(parameters) };
+            if (pick.ShowDialog(p.engine.Browser) != true) { WK.WKOpenPanelResultListenerCancel(listener); return; }
+            var urls = pick.FileNames.Select(f => WK.Url(new Uri(f).AbsoluteUri)).ToArray();
+            fixed (IntPtr* u = urls)
+            {
+                var array = WK.WKArrayCreate(u, (nuint)urls.Length);
+                WK.WKOpenPanelResultListenerChooseFiles(listener, array, IntPtr.Zero);
+                WK.WKRelease(array);
+            }
+            foreach (var u in urls) WK.WKRelease(u);
         }
-        foreach (var u in urls) WK.WKRelease(u);
+        catch (Exception e) { Trace.Log("callback OpenPanel threw: " + e.Message); }
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
@@ -517,7 +534,13 @@ sealed class WebKitPage : IPage
 
         protected override void DestroyWindowCore(HandleRef hwnd)
         {
-            if (page.view != IntPtr.Zero) { WK.WKRelease(page.view); page.view = IntPtr.Zero; }
+            // The window goes first, while WebKit's view object is still
+            // there to answer its last messages; the view is let go after.
+            WK.DestroyWindow(hwnd.Handle);
+            var view = page.view;
+            page.view = IntPtr.Zero;
+            if (view != IntPtr.Zero)
+                Dispatcher.BeginInvoke(() => WK.WKRelease(view), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         }
 
         protected override void OnGotKeyboardFocus(System.Windows.Input.KeyboardFocusChangedEventArgs e)

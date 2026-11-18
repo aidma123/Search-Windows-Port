@@ -57,8 +57,8 @@ sealed class Bench
             Trace.Log("bench: sample " + label);
             await Task.Delay(1500);
             GC.Collect();
-            var (priv, ws, n, names) = Measure();
-            samples.Add(new { label, privateMB = priv / 1048576.0, workingSetMB = ws / 1048576.0, processes = n, names });
+            var (priv, ws, n, names, each) = Measure();
+            samples.Add(new { label, privateMB = priv / 1048576.0, workingSetMB = ws / 1048576.0, processes = n, names, byProcess = each });
         }
 
         await Task.Delay(3000);
@@ -96,7 +96,7 @@ sealed class Bench
     }
 
     /// This process and all its descendants: commit charge and working set.
-    static (long Private, long WorkingSet, int Count, List<string> Names) Measure()
+    static (long Private, long WorkingSet, int Count, List<string> Names, Dictionary<string, string> Each) Measure()
     {
         var parents = new Dictionary<int, int>();
         var snapshot = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
@@ -132,6 +132,7 @@ sealed class Bench
             }
         }
         long priv = 0, ws = 0; var names = new List<string>();
+        var each = new Dictionary<string, (long Priv, long Ws)>();
         foreach (var pid in mine)
         {
             try
@@ -140,10 +141,13 @@ sealed class Bench
                 priv += p.PrivateMemorySize64;
                 ws += p.WorkingSet64;
                 names.Add(p.ProcessName);
+                each.TryGetValue(p.ProcessName, out var x);
+                each[p.ProcessName] = (x.Priv + p.PrivateMemorySize64, x.Ws + p.WorkingSet64);
             }
             catch { }
         }
-        return (priv, ws, names.Count, names.GroupBy(n => n).Select(g => g.Count() > 1 ? $"{g.Key} ×{g.Count()}" : g.Key).ToList());
+        return (priv, ws, names.Count, names.GroupBy(n => n).Select(g => g.Count() > 1 ? $"{g.Key} ×{g.Count()}" : g.Key).ToList(),
+            each.OrderByDescending(kv => kv.Value.Priv).ToDictionary(kv => kv.Key, kv => $"{kv.Value.Priv / 1048576.0:N0} MB private, {kv.Value.Ws / 1048576.0:N0} MB working set"));
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

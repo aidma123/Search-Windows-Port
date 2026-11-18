@@ -105,6 +105,10 @@ static unsafe class WK
     [DllImport(Dll)] public static extern void WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled(IntPtr p, bool v);
     [DllImport(Dll)] public static extern void WKPreferencesSetHiddenPageDOMTimerThrottlingAutoIncreases(IntPtr p, bool v);
     [DllImport(Dll)] public static extern void WKPreferencesSetAllowsPictureInPictureMediaPlayback(IntPtr p, bool v);
+    [DllImport(Dll)] public static extern void WKPreferencesSetAcceleratedCompositingEnabled(IntPtr p, bool v);
+    [DllImport(Dll)] public static extern void WKPreferencesSetAccelerated2DCanvasEnabled(IntPtr p, bool v);
+    [DllImport(Dll)] public static extern void WKPreferencesSetAcceleratedDrawingEnabled(IntPtr p, bool v);
+    [DllImport("user32.dll")] public static extern bool DestroyWindow(IntPtr hwnd);
 
     // Pages and views ------------------------------------------------------------
     [DllImport(Dll)] public static extern IntPtr WKPageConfigurationCreate();
