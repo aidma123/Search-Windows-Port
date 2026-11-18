@@ -118,6 +118,8 @@ jobs:
             Write-Host "exit code: $($p.ExitCode)"
             Get-Process | Where-Object { $_.ProcessName -match 'WebKit|msedgewebview2|Search' } | Stop-Process -Force -ErrorAction SilentlyContinue
             if (Test-Path (Join-Path $data "errors.log")) { Copy-Item (Join-Path $data "errors.log") "bench/errors-$($s.name).log"; Get-Content (Join-Path $data "errors.log") | Select-Object -First 60 }
+            if (Test-Path (Join-Path $data "trace.log")) { Copy-Item (Join-Path $data "trace.log") "bench/trace-$($s.name).log"; Write-Host "-- last steps:"; Get-Content (Join-Path $data "trace.log") | Select-Object -Last 25 }
+            if (Test-Path $out) { $j = Get-Content $out -Raw | ConvertFrom-Json; foreach ($x in $j.samples) { Write-Host ("{0}: {1:N0} MB in {2}" -f $x.label, $x.privateMB, ($x.names -join ', ')) } }
             if (-not (Test-Path $out)) { Write-Host "::warning::$($s.name) wrote no report" }
           }
           ./tools/bench-summary.ps1 bench | Tee-Object -FilePath bench/summary.md | Out-File -Append $env:GITHUB_STEP_SUMMARY

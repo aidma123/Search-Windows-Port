@@ -54,6 +54,7 @@ sealed class Bench
         var loads = new List<object>();
         async Task Sample(string label)
         {
+            Trace.Log("bench: sample " + label);
             await Task.Delay(1500);
             GC.Collect();
             var (priv, ws, n, names) = Measure();
@@ -66,6 +67,7 @@ sealed class Bench
         {
             var clock = Stopwatch.StartNew();
             waiting = new TaskCompletionSource();
+            Trace.Log("bench: open " + site);
             waitingFor = browser.Open(site);
             var finished = await Task.WhenAny(waiting.Task, Task.Delay(30000)) == waiting.Task;
             loads.Add(new { site, ms = clock.ElapsedMilliseconds, finished });
@@ -107,13 +109,27 @@ sealed class Bench
         }
         finally { CloseHandle(snapshot); }
 
+        // A parent id can belong to a process that has since exited and whose
+        // number Windows gave to someone else: a child must start after its parent.
+        var started = new Dictionary<int, DateTime?>();
+        DateTime? Start(int pid)
+        {
+            if (started.TryGetValue(pid, out var t)) return t;
+            try { using var p = Process.GetProcessById(pid); t = p.StartTime; } catch { t = null; }
+            return started[pid] = t;
+        }
         var mine = new HashSet<int> { Environment.ProcessId };
         bool grew = true;
         while (grew)
         {
             grew = false;
             foreach (var (pid, parent) in parents)
-                if (!mine.Contains(pid) && mine.Contains(parent) && pid != parent) { mine.Add(pid); grew = true; }
+            {
+                if (mine.Contains(pid) || !mine.Contains(parent) || pid == parent) continue;
+                var (child, mother) = (Start(pid), Start(parent));
+                if (child == null || mother == null || child < mother) continue;
+                mine.Add(pid); grew = true;
+            }
         }
         long priv = 0, ws = 0; var names = new List<string>();
         foreach (var pid in mine)

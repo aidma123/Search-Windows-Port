@@ -49,6 +49,7 @@ sealed class WebKitEngine : IEngine
     public async Task Start(BrowserWindow browser)
     {
         Browser = browser;
+        Trace.Log("webkit: start in " + WebKit.Folder);
         WK.SetDllDirectory(WebKit.Folder);
         var s = browser.Settings;
 
@@ -58,6 +59,7 @@ sealed class WebKitEngine : IEngine
         WK.WKContextConfigurationSetPrewarmsProcessesAutomatically(cc, false);
         if (s.SharedProcess) WK.WKContextConfigurationSetProcessSwapsOnNavigation(cc, false);
         Context = WK.WKContextCreateWithConfiguration(cc);
+        Trace.Log("webkit: context made");
         WK.WKRelease(cc);
         // DocumentViewer keeps almost nothing in memory between pages.
         WK.WKContextSetCacheModel(Context, s.Lean ? 0u : 2u);
@@ -82,8 +84,11 @@ sealed class WebKitEngine : IEngine
         WK.WKRelease(path);
 
         extensions = new WebKitExtensions(this);
+        Trace.Log("webkit: compiling the ad blocker");
         await ApplyShield(s.ShieldOn, s.ShieldPaused);
+        Trace.Log("webkit: ad blocker " + (shield != IntPtr.Zero ? "ready" : "failed"));
         await extensions.Start();
+        Trace.Log("webkit: started");
     }
 
     public IPage Create(PageOwner owner) => new WebKitPage(this, owner, IntPtr.Zero);

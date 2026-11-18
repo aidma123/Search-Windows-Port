@@ -194,7 +194,8 @@ static unsafe class WK
     // WKPageUIClient.h at the build's revision (newest version of each).
     public static class StateV0 { public const int Version = 0, Count = 21, IsLoading = 1, Title = 3, ActiveURL = 5, Progress = 9, CanGoBack = 11, CanGoForward = 13; }
     public static class NavigationV3 { public const int Version = 3, Count = 27, DidStart = 3, DidFailProvisional = 5, DidCommit = 6, DidFinish = 7, DidFail = 8, WebProcessDidCrash = 15; }
-    public static class UIV19 { public const int Version = 19, Count = 71, Close = 2, DidNotHandleKeyEvent = 12, RunOpenPanel = 28, IsPlayingAudioDidChange = 45, CreateNewPage = 51, Alert = 52, Confirm = 53, Prompt = 54; }
+    // The UI client counts its retired void* slots (unused1…unused8) too.
+    public static class UIV19 { public const int Version = 19, Count = 80, Close = 2, DidNotHandleKeyEvent = 12, RunOpenPanel = 28, IsPlayingAudioDidChange = 50, CreateNewPage = 57, Alert = 58, Confirm = 59, Prompt = 60; }
 
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern IntPtr SetParent(IntPtr child, IntPtr parent);

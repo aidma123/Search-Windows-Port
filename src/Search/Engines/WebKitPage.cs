@@ -81,9 +81,12 @@ sealed class WebKitPage : IPage
             WK.WKViewWindowAncestryDidChange(view);
             return hwnd;
         }
+        Trace.Log("page: making view");
         view = WK.WKViewCreate(default, config, parent);
         PageRef = WK.WKViewGetPage(view);
+        Trace.Log("page: view made, setting clients");
         Clients();
+        Trace.Log("page: clients set");
         var ua = WK.Str(WebKitEngine.UserAgent);
         WK.WKPageSetCustomUserAgent(PageRef, ua);
         WK.WKRelease(ua);
@@ -176,6 +179,7 @@ sealed class WebKitPage : IPage
         var p = From(info);
         p.loading = false;
         p.Refresh();
+        Trace.Log("page: finished " + p.Url);
         p.Finished?.Invoke(p.Url, p.Title, true);
         p.engine.extensions.Navigated(p, "completed");
         _ = p.FetchIcon();
@@ -315,6 +319,7 @@ sealed class WebKitPage : IPage
     {
         Url = url;
         if (PageRef == IntPtr.Zero) { pending = url; return; }
+        Trace.Log("page: load " + url);
         var u = WK.Url(url);
         WK.WKPageLoadURL(PageRef, u);
         WK.WKRelease(u);

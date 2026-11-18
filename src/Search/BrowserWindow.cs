@@ -116,6 +116,7 @@ sealed partial class BrowserWindow : Window
     {
         WebKitEngine.ClearIfAsked();
         Engine = Engines.Make(Engines.Default(Settings));
+        Trace.Log("engine: " + Engine.Name);
         Engine.DocumentScripts = DocumentScripts;
         try { await Engine.Start(this); }
         catch (Exception e) when (Engine is WebView2Engine && (e is Microsoft.Web.WebView2.Core.WebView2RuntimeNotFoundException || e is System.IO.FileNotFoundException))
