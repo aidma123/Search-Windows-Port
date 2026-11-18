@@ -9,26 +9,28 @@ no account, no telemetry.
 
 ## Two engines
 
-**WebKit**, the engine Search uses on the Mac, through WebKit's own Windows port
-(WinCairo, as built by Microsoft's Playwright project). This is the *WebKit build*:
-a zip with Search.exe and WebKit's files beside it (~65 MB zipped).
+**WebView2** is Microsoft Edge's Chromium engine. Every Windows 10 and 11 PC already has it, so Search is a single ~1.5 MB exe. **This is the default, and the one that uses the least memory.**
 
-**WebView2**, Microsoft Edge's Chromium engine, which every Windows 10 and 11 PC
-already has, so that build is a single ~1.5 MB exe.
+**WebKit** is the engine Search uses on the Mac, through WebKit's own Windows port (WinCairo, as built by Microsoft's Playwright project). It's in the *WebKit build*: a zip with Search.exe and WebKit's files beside it (~65 MB zipped). Choose it in Settings › Memory.
 
-The WebKit build carries both, and you can switch between them in Settings › Memory.
+### What the measurements say
 
-WebKit on Windows is a **prototype**:
+CI runs the same six sites in both engines on the same Windows machine. It adds up the private memory of every process the browser starts:
 
-- **Security:** WebKit's Windows port is built for testing, not shipped in any browser.
-  It gets security fixes only when Playwright rebuilds it, and its sandboxing on
-  Windows is weaker than Edge's.
-- **Media:** some video sites may not play.
-- **Missing for now:**
-  - downloads
-  - find-on-page UI
-  - fullscreen video
-  - picture-in-picture
+| Private MB (processes) | Empty window | 6 tabs open | Background tabs frozen | Background tabs asleep |
+|---|---:|---:|---:|---:|
+| WebView2 | 46 (1) | 680–707 (13–14) | 580–621 (13) | 266–295 (7) |
+| WebKit, GPU compositing on | 310 (1) | 3,493 (17) | 3,553 (17) | 1,656 (7) |
+
+The WebView2 figures span several runs. WebKit completed the benchmark once.
+
+**This WebKit build uses about five times WebView2's memory with the same tabs open,** and freezing background tabs doesn't bring it down. Pages loaded about as fast in both.
+
+**WebKit on Windows is an experiment, not a recommendation:**
+- **Security:** it's built for testing, not shipped in any browser. It gets security fixes only when Playwright rebuilds it, and its Windows sandboxing is weaker than Edge's.
+- **Stability:** it still crashes intermittently when a second tab opens. The cause is being traced in CI.
+- **No content blocker:** this build can't compile content rules at all, so network-level ad blocking and extensions' `declarativeNetRequest` rules can't work on it. The ad blocker falls back to hiding empty ad slots on the page.
+- **Missing for now:** downloads, find on page, fullscreen video and picture-in-picture.
 
 ## Download
 
@@ -60,9 +62,10 @@ Search is built to use as little RAM as it can, whichever engine draws the pages
 **WebKit only:**
 - **No idle processes:** no prewarmed or cached spare processes.
 - **Small caches:** the smallest cache model, and no back-forward cache in lean mode.
-- **Optional shared process:** *all tabs of a space share one page process*. It uses the least memory, but one crash takes every tab down and sites aren't kept apart.
+- **No GPU compositing in lean mode:** pages are drawn in software instead.
+- **Optional shared process (experimental, currently crashes):** *all tabs of a space share one page process*. One crash takes every tab down, and sites aren't kept apart.
 
-**Measured, not guessed.** CI runs `Search.exe --bench` on a Windows machine for WebView2, WebKit, and WebKit with a shared process. Each run opens the same six sites and adds up the memory of every process the browser started. The results are in the job summary of the latest *Build* run.
+**Measured, not guessed.** CI runs `Search.exe --bench` on a Windows machine for each engine setup. Each run opens the same six sites and adds up the memory of every process the browser started. The results are in the job summary of the latest *Build* run, with a per-process breakdown in the log; the table above comes from those runs.
 
 ## What carries over
 

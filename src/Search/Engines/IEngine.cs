@@ -81,13 +81,14 @@ interface IExtensionHost
 
 static class Engines
 {
-    /// WebKit when its files are beside the app (the WebKit build), else WebView2.
+    /// WebView2 unless WebKit is chosen: measured on the same machine and
+    /// sites, WebView2 used about a fifth of the memory (see README).
     public static string Default(Settings s)
     {
         foreach (var a in Environment.GetCommandLineArgs())
             if (a.StartsWith("--engine=")) return a[9..];
         if (s.EngineName is "webkit" or "webview2") return s.EngineName;
-        return WebKit.Available ? "webkit" : "webview2";
+        return "webview2";
     }
 
     public static IEngine Make(string name) => name == "webkit" && WebKit.Available ? new WebKitEngine() : new WebView2Engine();

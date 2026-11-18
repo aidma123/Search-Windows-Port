@@ -76,6 +76,7 @@ sealed class WebKitPage : IPage
     static void Safe(string where, Action act)
     {
         if (uiThread == 0) uiThread = Application.Current.Dispatcher.Thread.ManagedThreadId;
+        Trace.Log("cb " + where);
         if (Environment.CurrentManagedThreadId != uiThread) Trace.Log("callback off the UI thread: " + where);
         try { act(); }
         catch (Exception e)
@@ -398,26 +399,30 @@ sealed class WebKitPage : IPage
         var expression = script.Trim().TrimEnd(';');
         var body = "return JSON.stringify(await (" + expression + "\n));";
         var done = new TaskCompletionSource<string?>();
-        var handle = GCHandle.Alloc(done);
+        long id = Interlocked.Increment(ref nextEval);
+        evals[id] = done;
         var s = WK.Str(body);
         var args = WK.WKDictionaryCreate(null, null, 0);
         Trace.Log("page: eval in " + Url);
-        WK.WKPageCallAsyncJavaScript(PageRef, s, args, IntPtr.Zero, GCHandle.ToIntPtr(handle), &Evaluated);
+        WK.WKPageCallAsyncJavaScript(PageRef, s, args, IntPtr.Zero, (IntPtr)id, &Evaluated);
         WK.WKRelease(s);
         WK.WKRelease(args);
         return done.Task;
     }
 
+    static long nextEval;
+    static readonly Dictionary<long, TaskCompletionSource<string?>> evals = new();
+
+    /// Keyed by a number, not a handle: a late or repeated answer finds
+    /// nothing and is dropped, rather than reaching freed memory.
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void Evaluated(IntPtr result, IntPtr error, IntPtr context)
     {
         Safe("Evaluated", () =>
         {
-            var handle = GCHandle.FromIntPtr(context);
-            var done = (TaskCompletionSource<string?>)handle.Target!;
-            handle.Free();
+            if (!evals.Remove((long)context, out var done)) { Trace.Log("eval answer with no question"); return; }
             Trace.Log("page: eval done" + (error != IntPtr.Zero ? " with an error" : ""));
-        done.TrySetResult(error != IntPtr.Zero ? null : WK.Text(result));
+            done.TrySetResult(error != IntPtr.Zero ? null : WK.Text(result));
         });
     }
 
