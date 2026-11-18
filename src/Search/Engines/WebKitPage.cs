@@ -371,6 +371,7 @@ sealed class WebKitPage : IPage
 
     public Task Freeze()
     {
+        Trace.Log("page: freeze " + Url);
         if (view != IntPtr.Zero) WK.WKViewSetIsInWindow(view, false);
         engine.Trim();
         return Task.CompletedTask;

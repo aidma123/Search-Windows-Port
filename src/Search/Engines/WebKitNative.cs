@@ -96,7 +96,7 @@ static unsafe class WK
     [DllImport(Dll)] public static extern void WKWebsiteDataStoreConfigurationSetCookieStorageFile(IntPtr c, IntPtr s);
     [DllImport(Dll)] public static extern IntPtr WKWebsiteDataStoreCreateWithConfiguration(IntPtr c);
     [DllImport(Dll)] public static extern IntPtr WKWebsiteDataStoreCreateNonPersistentDataStore();
-    [DllImport(Dll)] public static extern void WKWebsiteDataStoreRemoveMemoryCaches(IntPtr store);
+    [DllImport(Dll)] public static extern void WKWebsiteDataStoreRemoveMemoryCaches(IntPtr store, IntPtr context, delegate* unmanaged[Cdecl]<IntPtr, void> done);
     [DllImport(Dll)] public static extern IntPtr WKPreferencesCreate();
     [DllImport(Dll)] public static extern void WKPreferencesSetDeveloperExtrasEnabled(IntPtr p, bool v);
     [DllImport(Dll)] public static extern void WKPreferencesSetFullScreenEnabled(IntPtr p, bool v);

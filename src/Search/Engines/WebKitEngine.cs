@@ -134,7 +134,11 @@ sealed class WebKitEngine : IEngine
             {
                 // Least memory: every tab of a space in the one page process.
                 var related = Pages.FirstOrDefault(p => p != page && p.Owner is { } o && o.Profile == owner.Profile && !o.Private && p.PageRef != IntPtr.Zero);
-                if (related != null) WK.WKPageConfigurationSetRelatedPage(config, related.PageRef);
+                if (related != null)
+                {
+                    Trace.Log("webkit: sharing the page process of " + related.Url);
+                    WK.WKPageConfigurationSetRelatedPage(config, related.PageRef);
+                }
             }
         }
         var ucc = WK.WKUserContentControllerCreate();
@@ -195,15 +199,24 @@ sealed class WebKitEngine : IEngine
         var handle = GCHandle.FromIntPtr(context);
         var done = (TaskCompletionSource<IntPtr>)handle.Target!;
         handle.Free();
+        Trace.Log($"webkit: rules compiled, result {result}, list {(filter != IntPtr.Zero ? "made" : "none")}");
         // The list is kept for as long as the app runs.
         done.TrySetResult(result == 0 && filter != IntPtr.Zero ? WK.WKRetain(filter) : IntPtr.Zero);
     }
 
     public void Recolour() { }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    static void Removed(IntPtr context) { }
+
+    unsafe void RemoveMemoryCaches()
+    {
+        foreach (var s in stores.Values) WK.WKWebsiteDataStoreRemoveMemoryCaches(s, IntPtr.Zero, &Removed);
+    }
+
     public Task ClearData()
     {
-        foreach (var s in stores.Values) WK.WKWebsiteDataStoreRemoveMemoryCaches(s);
+        RemoveMemoryCaches();
         // Files in use can't go now: they go before the engine starts next time.
         File.WriteAllText(Path.Combine(Store.Folder, "WebKit", "clear-on-start"), "");
         return Task.CompletedTask;
@@ -212,8 +225,9 @@ sealed class WebKitEngine : IEngine
     /// Minimised, or a tab frozen: what the engine can give back now.
     internal void Trim()
     {
+        Trace.Log("webkit: trim");
         WK.WKContextGarbageCollectJavaScriptObjects(Context);
-        foreach (var s in stores.Values) WK.WKWebsiteDataStoreRemoveMemoryCaches(s);
+        RemoveMemoryCaches();
     }
 
     public static void ClearIfAsked()
