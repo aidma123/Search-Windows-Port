@@ -85,6 +85,19 @@ sealed class WebKitEngine : IEngine
 
         extensions = new WebKitExtensions(this);
         Trace.Log("webkit: compiling the ad blocker");
+        if (Environment.GetCommandLineArgs().Any(a => a.StartsWith("--bench=")))
+        {
+            // Does this build's content blocker compile anything at all?
+            var probe = await Compile("probe", "[{\"trigger\":{\"url-filter\":\"example\"},\"action\":{\"type\":\"block\"}}]");
+            Trace.Log("webkit: probe rule " + (probe != IntPtr.Zero ? "compiled" : "failed"));
+            if (probe != IntPtr.Zero)
+            {
+                var each = System.Text.Json.Nodes.JsonNode.Parse(ContentRules.Shield(s.ShieldPaused))!.AsArray();
+                for (int i = 0; i < each.Count; i++)
+                    if (await Compile("probe" + i, "[" + each[i]!.ToJsonString() + "]") == IntPtr.Zero)
+                        Trace.Log($"webkit: rule {i} won't compile: {each[i]!.ToJsonString()}");
+            }
+        }
         await ApplyShield(s.ShieldOn, s.ShieldPaused);
         Trace.Log("webkit: ad blocker " + (shield != IntPtr.Zero ? "ready" : "failed"));
         await extensions.Start();

@@ -68,6 +68,22 @@ sealed class WebKitPage : IPage
     public event Action<bool>? FullScreen { add { } remove { } }
 
     IntPtr Info => GCHandle.ToIntPtr(self);
+    static int uiThread;
+
+    /// Every callback from WebKit runs through here: an exception thrown
+    /// back into native code would end the process, so it is written down
+    /// instead, along with any callback that arrives off the UI thread.
+    static void Safe(string where, Action act)
+    {
+        if (uiThread == 0) uiThread = Application.Current.Dispatcher.Thread.ManagedThreadId;
+        if (Environment.CurrentManagedThreadId != uiThread) Trace.Log("callback off the UI thread: " + where);
+        try { act(); }
+        catch (Exception e)
+        {
+            Trace.Log($"callback {where} threw: {e.GetType().Name}: {e.Message}");
+            try { File.AppendAllText(Path.Combine(Store.Folder, "errors.log"), $"{DateTime.Now:u} {where}: {e}\n\n"); } catch { }
+        }
+    }
     static WebKitPage From(IntPtr info) => (WebKitPage)GCHandle.FromIntPtr(info).Target!;
 
     /// The view, made in (or moved to) the window it belongs to.
@@ -146,7 +162,7 @@ sealed class WebKitPage : IPage
     // Callbacks -----------------------------------------------------------------
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    static void StateChanged(IntPtr info) => From(info).Refresh();
+    static void StateChanged(IntPtr info) => Safe("state", () => From(info).Refresh());
 
     void Refresh()
     {
@@ -160,64 +176,87 @@ sealed class WebKitPage : IPage
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void DidStart(IntPtr page, IntPtr navigation, IntPtr userData, IntPtr info)
     {
-        var p = From(info);
-        p.loading = true;
-        p.Refresh();
+        Safe("DidStart", () =>
+        {
+            var p = From(info);
+            p.loading = true;
+            p.Refresh();
+        });
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void DidCommit(IntPtr page, IntPtr navigation, IntPtr userData, IntPtr info)
     {
-        var p = From(info);
-        p.Refresh();
-        p.engine.extensions.Navigated(p, "committed");
+        Safe("DidCommit", () =>
+        {
+            var p = From(info);
+            p.Refresh();
+            p.engine.extensions.Navigated(p, "committed");
+        });
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void DidFinish(IntPtr page, IntPtr navigation, IntPtr userData, IntPtr info)
     {
-        var p = From(info);
-        p.loading = false;
-        p.Refresh();
-        Trace.Log("page: finished " + p.Url);
-        p.Finished?.Invoke(p.Url, p.Title, true);
-        p.engine.extensions.Navigated(p, "completed");
-        _ = p.FetchIcon();
+        Safe("DidFinish", () =>
+        {
+            var p = From(info);
+            p.loading = false;
+            p.Refresh();
+            Trace.Log("page: finished " + p.Url);
+            p.Finished?.Invoke(p.Url, p.Title, true);
+            p.engine.extensions.Navigated(p, "completed");
+            _ = p.FetchIcon();
+        });
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void DidFail(IntPtr page, IntPtr navigation, IntPtr error, IntPtr userData, IntPtr info)
     {
-        var p = From(info);
-        p.loading = false;
-        p.Refresh();
-        p.Finished?.Invoke(p.Url, p.Title, false);
+        Safe("DidFail", () =>
+        {
+            var p = From(info);
+            p.loading = false;
+            p.Refresh();
+            p.Finished?.Invoke(p.Url, p.Title, false);
+        });
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void Crashed(IntPtr page, IntPtr info)
     {
-        var p = From(info);
-        p.loading = false;
-        Application.Current.Dispatcher.BeginInvoke(() => { if (!p.disposed) WK.WKPageReload(p.PageRef); });
+        Safe("Crashed", () =>
+        {
+            var p = From(info);
+            p.loading = false;
+            Application.Current.Dispatcher.BeginInvoke(() => { if (!p.disposed) WK.WKPageReload(p.PageRef); });
+        });
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static IntPtr CreateNewPage(IntPtr page, IntPtr configuration, IntPtr action, IntPtr features, IntPtr info)
     {
-        var p = From(info);
-        if (p.Owner == null) return IntPtr.Zero;
-        var child = new WebKitPage(p.engine, p.Owner, configuration);
-        p.Opened?.Invoke(child, "", Native.CtrlHeld);
-        // The caller takes a reference, as the API says.
-        return WK.WKRetain(child.PageRef);
+        IntPtr made = IntPtr.Zero;
+        Safe("CreateNewPage", () =>
+        {
+            var p = From(info);
+            if (p.Owner == null) return;
+            var child = new WebKitPage(p.engine, p.Owner, configuration);
+            p.Opened?.Invoke(child, "", Native.CtrlHeld);
+            // The caller takes a reference, as the API says.
+            made = WK.WKRetain(child.PageRef);
+        });
+        return made;
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void CloseWindow(IntPtr page, IntPtr info)
     {
-        var p = From(info);
-        Application.Current.Dispatcher.BeginInvoke(() => p.CloseRequested?.Invoke());
+        Safe("CloseWindow", () =>
+        {
+            var p = From(info);
+            Application.Current.Dispatcher.BeginInvoke(() => p.CloseRequested?.Invoke());
+        });
     }
 
     /// Keys the page didn't use go to the window, as if typed there: Ctrl+T,
@@ -274,40 +313,46 @@ sealed class WebKitPage : IPage
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    static void AudioChanged(IntPtr page, IntPtr info) => From(info).Changed?.Invoke();
+    static void AudioChanged(IntPtr page, IntPtr info) => Safe("audio", () => From(info).Changed?.Invoke());
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void OnMessage(IntPtr message, IntPtr reply, IntPtr info)
     {
-        var p = From(info);
-        var body = WK.Text(WK.WKScriptMessageGetBody(message));
-        if (reply != IntPtr.Zero) WK.WKCompletionListenerComplete(reply, IntPtr.Zero);
-        if (body != null) p.Message?.Invoke(body);
+        Safe("OnMessage", () =>
+        {
+            var p = From(info);
+            var body = WK.Text(WK.WKScriptMessageGetBody(message));
+            if (reply != IntPtr.Zero) WK.WKCompletionListenerComplete(reply, IntPtr.Zero);
+            if (body != null) p.Message?.Invoke(body);
+        });
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void OnExtensionMessage(IntPtr message, IntPtr reply, IntPtr info)
     {
-        var p = From(info);
-        var body = WK.Text(WK.WKScriptMessageGetBody(message));
-        var frame = WK.WKScriptMessageGetFrameInfo(message);
-        bool main = frame == IntPtr.Zero || WK.WKFrameInfoGetIsMainFrame(frame);
-        string origin = "";
-        if (frame != IntPtr.Zero)
+        Safe("OnExtensionMessage", () =>
         {
-            var o = WK.WKFrameInfoCopySecurityOrigin(frame);
-            if (o != IntPtr.Zero) { origin = WK.Take(WK.WKSecurityOriginCopyToString(o)); WK.WKRelease(o); }
-        }
-        // The answer may take a while (a message to the background and back):
-        // the listener is kept until then.
-        if (reply != IntPtr.Zero) WK.WKRetain(reply);
-        p.engine.extensions.Receive(p, body ?? "", origin, main, json =>
-        {
-            if (reply == IntPtr.Zero) return;
-            var s = WK.Str(json);
-            WK.WKCompletionListenerComplete(reply, s);
-            WK.WKRelease(s);
-            WK.WKRelease(reply);
+            var p = From(info);
+            var body = WK.Text(WK.WKScriptMessageGetBody(message));
+            var frame = WK.WKScriptMessageGetFrameInfo(message);
+            bool main = frame == IntPtr.Zero || WK.WKFrameInfoGetIsMainFrame(frame);
+            string origin = "";
+            if (frame != IntPtr.Zero)
+            {
+                var o = WK.WKFrameInfoCopySecurityOrigin(frame);
+                if (o != IntPtr.Zero) { origin = WK.Take(WK.WKSecurityOriginCopyToString(o)); WK.WKRelease(o); }
+            }
+            // The answer may take a while (a message to the background and back):
+            // the listener is kept until then.
+            if (reply != IntPtr.Zero) WK.WKRetain(reply);
+            p.engine.extensions.Receive(p, body ?? "", origin, main, json =>
+            {
+                if (reply == IntPtr.Zero) return;
+                var s = WK.Str(json);
+                WK.WKCompletionListenerComplete(reply, s);
+                WK.WKRelease(s);
+                WK.WKRelease(reply);
+            });
         });
     }
 
@@ -339,6 +384,7 @@ sealed class WebKitPage : IPage
         var handle = GCHandle.Alloc(done);
         var s = WK.Str(body);
         var args = WK.WKDictionaryCreate(null, null, 0);
+        Trace.Log("page: eval in " + Url);
         WK.WKPageCallAsyncJavaScript(PageRef, s, args, IntPtr.Zero, GCHandle.ToIntPtr(handle), &Evaluated);
         WK.WKRelease(s);
         WK.WKRelease(args);
@@ -348,10 +394,14 @@ sealed class WebKitPage : IPage
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     static void Evaluated(IntPtr result, IntPtr error, IntPtr context)
     {
-        var handle = GCHandle.FromIntPtr(context);
-        var done = (TaskCompletionSource<string?>)handle.Target!;
-        handle.Free();
+        Safe("Evaluated", () =>
+        {
+            var handle = GCHandle.FromIntPtr(context);
+            var done = (TaskCompletionSource<string?>)handle.Target!;
+            handle.Free();
+            Trace.Log("page: eval done" + (error != IntPtr.Zero ? " with an error" : ""));
         done.TrySetResult(error != IntPtr.Zero ? null : WK.Text(result));
+        });
     }
 
     /// WebKit's call already counts as the person's own action.
@@ -361,6 +411,7 @@ sealed class WebKitPage : IPage
 
     public void SetShown(bool on)
     {
+        Trace.Log($"page: {(on ? "show" : "hide")} {Url}");
         shown = on;
         host.Visibility = on ? Visibility.Visible : Visibility.Hidden;
         // A page out of the window is throttled by WebKit: timers slowed,
