@@ -53,7 +53,7 @@ abstract class Sheet : Window
     {
         if (closing) return;
         closing = true;
-        Dispatcher.BeginInvoke(() => { try { Close(); } catch { } Browser.Current?.View?.Focus(); });
+        Dispatcher.BeginInvoke(() => { try { Close(); } catch { } Browser.Current?.Page?.Focus(); });
     }
 
     /// A row in a list: an icon, a title, a line under it; grey when chosen.
@@ -467,7 +467,7 @@ sealed class ExtensionsMenu : Sheet
         {
             var add = Ui.Pill("Add This Extension to Search", async () =>
             {
-                try { var name = await Web.InstallFromStore(here); Browser.Toast("Added " + name); }
+                try { var name = await Browser.Engine.Extensions.InstallFromStore(here); Browser.Toast("Added " + name); }
                 catch (Exception e) { Browser.Toast(e.Message); }
                 Dismiss();
             }, filled: true);
@@ -475,13 +475,14 @@ sealed class ExtensionsMenu : Sheet
             add.HorizontalAlignment = HorizontalAlignment.Left;
             p.Children.Add(add);
         }
-        if (Web.Installed.Items.Count == 0)
+        var all = Browser.Engine.Extensions.All;
+        if (all.Count == 0)
             p.Children.Add(Switcher.Nothing("None yet. Open an extension's page in the Chrome Web Store and come back here, or add one in Settings."));
-        foreach (var ext in Web.Installed.Items)
+        foreach (var ext in all)
         {
             var e = ext;
-            p.Children.Add(ListRow(Ui.Icon(Ui.Glyph.Puzzle, 12), e.Name, Crx.Popup(e.Folder) != null ? null : "No popup — opens its options", false,
-                () => { Dismiss(); ExtensionPopup.Open(Browser, e); }));
+            p.Children.Add(ListRow(Ui.Icon(Ui.Glyph.Puzzle, 12), e.Name, e.HasPopup ? null : "No popup — opens its options", false,
+                () => { Dismiss(); Browser.Engine.Extensions.OpenPopup(Browser, e); }));
         }
         var manage = Ui.Pill("Manage in Settings…", () => { Dismiss(); Browser.Dispatcher.BeginInvoke(() => Browser.RaiseSettings()); });
         manage.Margin = new Thickness(8, 8, 8, 4);

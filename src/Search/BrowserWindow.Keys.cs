@@ -113,8 +113,6 @@ sealed partial class BrowserWindow
     public async void ApplySettings(bool shieldChanged = false)
     {
         if (Theme.Look != Settings.Look) Theme.Apply(Settings.Look);
-        foreach (var t in Spaces.SelectMany(s => s.All))
-            if (Core(t) is { } core) core.Settings.IsPasswordAutosaveEnabled = Settings.SavePasswords && !t.Private;
         if (shieldChanged) await RefreshShield();
         SaveSettings();
         Render();

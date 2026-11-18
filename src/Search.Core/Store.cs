@@ -53,6 +53,11 @@ public sealed class Settings
     public int FreezeSeconds { get; set; } = 20;
     /// Chromium's low-memory mode. Smaller caches; gradients can band a little.
     public bool Lean { get; set; } = true;
+    /// "webkit", "webview2", or empty for whichever the build carries.
+    public string EngineName { get; set; } = "";
+    /// WebKit: every tab of a space in one page process. Least memory; one
+    /// page crashing takes the others with it, and sites are not isolated.
+    public bool SharedProcess { get; set; }
     public bool FloatOnLeave { get; set; }
     public bool SavePasswords { get; set; } = true;
     public bool SpaceSwipe { get; set; } = true;

@@ -14,7 +14,7 @@ static class Program
     static int Main(string[] args)
     {
         using var single = new Mutex(true, @"Local\SearchBrowser-" + Environment.UserName, out bool first);
-        if (!first)
+        if (!first && !args.Any(a => a.StartsWith("--data=")))
         {
             try
             {
@@ -27,6 +27,8 @@ static class Program
             catch { /* the first one is gone; carry on as the first */ }
         }
 
+        // --data=folder: a profile of its own (benchmarks, tests), and no single-instance hand-off.
+        foreach (var a in args) if (a.StartsWith("--data=")) Store.Folder = Path.GetFullPath(a[7..]);
         Directory.CreateDirectory(Store.Folder);
         var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
         app.DispatcherUnhandledException += (_, e) =>

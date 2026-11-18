@@ -102,7 +102,7 @@ sealed partial class BrowserWindow : Window
         StateChanged += (_, _) =>
         {
             if (WindowState == WindowState.Minimized) _ = FreezeAll();
-            else if (Current?.View?.CoreWebView2 is { IsSuspended: true } c) c.Resume();
+            else Current?.Page?.SetShown(true);
         };
         OnTheme();
     }
@@ -114,8 +114,11 @@ sealed partial class BrowserWindow : Window
 
     async Task Start()
     {
-        try { await Web.StartAsync(Settings.Lean); }
-        catch (Exception e) when (e is Microsoft.Web.WebView2.Core.WebView2RuntimeNotFoundException || e is System.IO.FileNotFoundException)
+        WebKitEngine.ClearIfAsked();
+        Engine = Engines.Make(Engines.Default(Settings));
+        Engine.DocumentScripts = DocumentScripts;
+        try { await Engine.Start(this); }
+        catch (Exception e) when (Engine is WebView2Engine && (e is Microsoft.Web.WebView2.Core.WebView2RuntimeNotFoundException || e is System.IO.FileNotFoundException))
         {
             var go = MessageBox.Show(this,
                 "Search draws pages with Microsoft Edge WebView2, which isn't installed on this PC.\n\nOpen the download page?",
@@ -135,6 +138,8 @@ sealed partial class BrowserWindow : Window
         if (Space.Selected == null && Space.All.Any()) Space.Selected = Space.All.First();
         if (Space.Selected is { } sel) await Select(sel, force: true);
         Render();
+        Bench = Bench.FromArgs(this);
+        if (Bench != null) { _ = Bench.Run(); return; }
         if (!Space.All.Any()) OpenOmnibox(newTab: true);
     }
 
@@ -145,9 +150,7 @@ sealed partial class BrowserWindow : Window
         Background = Theme.Frame;
         Pages.Background = Theme.Ground;
         if (IsLoaded) Native.PaintFrame(this);
-        Web.Recolour();
-        foreach (var t in Spaces.SelectMany(s => s.All))
-            if (t.View != null) t.View.DefaultBackgroundColor = System.Drawing.Color.FromArgb(Theme.GroundColor.R, Theme.GroundColor.G, Theme.GroundColor.B);
+        Engine?.Recolour();
         BuildEmpty();
         Render();
     }

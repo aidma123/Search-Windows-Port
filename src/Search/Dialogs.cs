@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using Microsoft.Web.WebView2.Wpf;
 using Search.Core;
 
 namespace Search;
@@ -129,47 +128,6 @@ static class NewSpaceDialog
     }
 }
 
-/// An extension's popup, in a small window of its own, signed in as the
-/// space you are in.
-static class ExtensionPopup
-{
-    public static async void Open(BrowserWindow browser, InstalledExtension ext)
-    {
-        var profile = Web.Profiles.FirstOrDefault(p => p.ProfileName == browser.Space.Profile) ?? Web.Profiles.FirstOrDefault();
-        if (profile == null) { browser.Toast("Open a page first"); return; }
-        var found = (await profile.GetBrowserExtensionsAsync()).FirstOrDefault(e => e.Name == ext.Name);
-        if (found == null) { browser.Toast(ext.Name + " isn't loaded in this space"); return; }
-        var popup = Crx.Popup(ext.Folder);
-        if (popup == null)
-        {
-            var options = Crx.OptionsPage(ext.Folder);
-            if (options != null) browser.Open($"chrome-extension://{found.Id}/{options}");
-            else browser.Toast(ext.Name + " has nothing to show");
-            return;
-        }
-        var w = new Window
-        {
-            Owner = browser, Title = ext.Name, Width = 400, Height = 560, ShowInTaskbar = false,
-            WindowStyle = WindowStyle.ToolWindow, Background = Theme.Ground,
-        };
-        var at = browser.Anchor(400);
-        w.Left = at.X + 160; w.Top = at.Y - 30;
-        var view = new WebView2();
-        w.Content = view;
-        w.SourceInitialized += (_, _) => Native.PaintFrame(w);
-        w.Deactivated += (_, _) => { try { w.Close(); } catch { } };
-        w.Closed += (_, _) => view.Dispose();
-        w.Show();
-        var o = Web.Env.CreateCoreWebView2ControllerOptions();
-        o.ProfileName = profile.ProfileName;
-        await view.EnsureCoreWebView2Async(Web.Env, o);
-        view.CoreWebView2.DocumentTitleChanged += (_, _) => { if (view.CoreWebView2.DocumentTitle.Length > 0) w.Title = view.CoreWebView2.DocumentTitle; };
-        view.CoreWebView2.NewWindowRequested += (_, e) => { e.Handled = true; browser.Open(e.Uri); };
-        view.CoreWebView2.WindowCloseRequested += (_, _) => w.Close();
-        view.CoreWebView2.Navigate($"chrome-extension://{found.Id}/{popup}");
-    }
-}
-
 /// Settings: a page of choices, each taking effect as it is made.
 sealed class SettingsWindow : Plain
 {
@@ -210,6 +168,13 @@ sealed class SettingsWindow : Plain
             S.SleepMinutes.ToString(), v => { S.SleepMinutes = int.Parse(v); browser.ApplySettings(); });
         Add(SiteCard.Toggle("Lean engine — smaller caches, as on a low-memory PC (after a restart)", S.Lean, true, on => { S.Lean = on; browser.ApplySettings(); }));
         Note("Lean mode can make some gradients look slightly banded. Turn it off if a site looks wrong.");
+
+        if (WebKit.Available)
+        {
+            Choice("Engine (after a restart)", new[] { ("webkit", "WebKit"), ("webview2", "WebView2 (Edge)") },
+                Engines.Default(S), v => { S.EngineName = v; browser.SaveSettings(); });
+            Add(SiteCard.Toggle("WebKit: all tabs of a space share one page process (least memory; a crash takes them all, and sites aren't kept apart)", S.SharedProcess, true, on => { S.SharedProcess = on; browser.SaveSettings(); }));
+        }
 
         Section("Appearance");
         Choice(null, new[] { ("system", "As Windows is"), ("light", "Light"), ("dark", "Dark") }, S.Look,
@@ -262,12 +227,13 @@ sealed class SettingsWindow : Plain
             }));
 
         Section("Extensions");
-        Note("Chrome extensions run in the engine's own extension support. Paste a Chrome Web Store link, or load a folder you are building.");
-        foreach (var ext in Web.Installed.Items.ToList())
+        var extensionHost = browser.Engine.Extensions;
+        Note(extensionHost.About);
+        foreach (var ext in extensionHost.All.ToList())
         {
             var e = ext;
             var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4) };
-            var remove = Ui.Pill("Remove", async () => { await Web.Remove(e.Name); Draw(); });
+            var remove = Ui.Pill("Remove", async () => { await extensionHost.Remove(e); Draw(); });
             DockPanel.SetDock(remove, Dock.Right);
             row.Children.Add(remove);
             var words = new StackPanel();
@@ -280,7 +246,7 @@ sealed class SettingsWindow : Plain
         var linkRow = new DockPanel { Margin = new Thickness(0, 6, 0, 0) };
         var addButton = Ui.Pill("Add", async () =>
         {
-            try { var n = await Web.InstallFromStore(link.Text); browser.Toast("Added " + n); Draw(); }
+            try { var n = await extensionHost.InstallFromStore(link.Text); browser.Toast("Added " + n); Draw(); }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Search"); }
         }, filled: true);
         addButton.Margin = new Thickness(8, 6, 0, 0);
@@ -296,7 +262,7 @@ sealed class SettingsWindow : Plain
         {
             var pick = new Microsoft.Win32.OpenFolderDialog { Title = "The extension's folder (with manifest.json)" };
             if (pick.ShowDialog(this) != true) return;
-            try { var n = await Web.AddFolder(pick.FolderName); browser.Toast("Added " + n); Draw(); }
+            try { var n = await extensionHost.AddFolder(pick.FolderName); browser.Toast("Added " + n); Draw(); }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Search"); }
         }));
 
@@ -309,7 +275,7 @@ sealed class SettingsWindow : Plain
 
         Section("About");
         var version = typeof(SettingsWindow).Assembly.GetName().Version;
-        Note($"Search for Windows {version?.ToString(3)} · engine: Microsoft Edge WebView2 {Web.RuntimeVersion ?? "(not found)"}");
+        Note($"Search for Windows {version?.ToString(3)} · engine: {browser.Engine.Name} {browser.Engine.Version ?? ""}");
         Note("A port of Search for Mac by Office Commun (MIT). Nothing is sent anywhere except the pages you ask for.");
     }
 

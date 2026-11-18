@@ -1,5 +1,4 @@
 using System.Windows.Media;
-using Microsoft.Web.WebView2.Wpf;
 using Search.Core;
 
 namespace Search;
@@ -26,12 +25,8 @@ sealed class Tab
     public DateTime Seen { get; set; } = DateTime.Now;
     /// When it was last hidden: frozen a little after.
     public DateTime Left { get; set; } = DateTime.Now;
-    public WebView2? View { get; set; }
-    public bool Awake => View != null;
-    /// Navigations made before the page exists.
-    public string? Pending { get; set; }
-    public string? ShieldScript { get; set; }
-    public string? HiddenScript { get; set; }
+    public IPage? Page { get; set; }
+    public bool Awake => Page != null;
 
     public string Host => Uri.TryCreate(Url, UriKind.Absolute, out var u) ? u.Host : "";
 

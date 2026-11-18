@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # WebKit for Windows: the WinCairo build Playwright publishes.
+  WEBKIT_REVISION: "2395"
+
 jobs:
   build:
     runs-on: windows-latest
@@ -36,16 +40,91 @@ jobs:
             Rename-Item "out/$rid/Search.exe" "Search-$rid.exe"
             Rename-Item "out/$rid-standalone/Search.exe" "Search-$rid-standalone.exe"
           }
-          Get-ChildItem out -Recurse -Filter *.exe | Format-Table Name, Length
+
+      - name: Package the WebKit build
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\webkit-win64.zip"
+          Invoke-WebRequest "https://cdn.playwright.dev/dbazure/download/playwright/builds/webkit/$env:WEBKIT_REVISION/webkit-win64.zip" -OutFile $zip
+          $dir = "out/Search-WebKit-win-x64"
+          dotnet publish src/Search -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o $dir
+          Expand-Archive $zip -DestinationPath $dir -Force
+          # Playwright's own test shell isn't part of Search.
+          Remove-Item "$dir/Playwright.exe", "$dir/protocol.json" -ErrorAction SilentlyContinue
+          Copy-Item LICENSE, THIRD-PARTY-NOTICES.md $dir
+          Compress-Archive "$dir/*" "out/Search-WebKit-win-x64.zip"
+          Get-ChildItem out -Recurse -Include *.exe, *.zip -Depth 1 | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
           name: Search-windows
-          path: out/**/*.exe
+          path: |
+            out/win-*/*.exe
+            out/Search-WebKit-win-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-builds
+          retention-days: 3
+          path: |
+            out/win-x64/Search-win-x64.exe
+            out/Search-WebKit-win-x64/**
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: out/**/*.exe
+          files: |
+            out/win-*/*.exe
+            out/Search-WebKit-win-x64.zip
           generate_release_notes: true
+
+  # The same sites in each engine, on the same machine: what the whole
+  # browser (every process it starts) holds in memory.
+  memory:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bench-builds
+          path: builds
+
+      - name: Run the benchmark
+        shell: pwsh
+        run: |
+          $webview2 = (Get-ChildItem builds -Recurse -Filter Search-win-x64.exe | Select-Object -First 1).FullName
+          $webkit = (Get-ChildItem builds -Recurse -Filter Search.exe | Where-Object { Test-Path (Join-Path $_.DirectoryName WebKit2.dll) } | Select-Object -First 1).FullName
+          $setups = @(
+            @{ name = "webview2"; exe = $webview2; engine = "webview2"; settings = '{}' },
+            @{ name = "webkit"; exe = $webkit; engine = "webkit"; settings = '{}' },
+            @{ name = "webkit-shared-process"; exe = $webkit; engine = "webkit"; settings = '{"sharedProcess": true}' }
+          )
+          New-Item -ItemType Directory bench | Out-Null
+          foreach ($s in $setups) {
+            $data = Join-Path $env:RUNNER_TEMP "data-$($s.name)"
+            New-Item -ItemType Directory $data | Out-Null
+            Set-Content (Join-Path $data "settings.json") $s.settings
+            $out = Join-Path (Resolve-Path bench) "bench-$($s.name).json"
+            Write-Host "== $($s.name): $($s.exe)"
+            $p = Start-Process $s.exe -ArgumentList "--engine=$($s.engine)", "--bench=$out", "--data=$data" -PassThru
+            if (-not $p.WaitForExit(420000)) { Write-Host "timed out"; Stop-Process -Id $p.Id -Force }
+            Write-Host "exit code: $($p.ExitCode)"
+            Get-Process | Where-Object { $_.ProcessName -match 'WebKit|msedgewebview2|Search' } | Stop-Process -Force -ErrorAction SilentlyContinue
+            if (Test-Path (Join-Path $data "errors.log")) { Copy-Item (Join-Path $data "errors.log") "bench/errors-$($s.name).log"; Get-Content (Join-Path $data "errors.log") | Select-Object -First 60 }
+            if (-not (Test-Path $out)) { Write-Host "::warning::$($s.name) wrote no report" }
+          }
+          ./tools/bench-summary.ps1 bench | Tee-Object -FilePath bench/summary.md | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          Get-Content bench/summary.md
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: memory-benchmark
+          path: bench/

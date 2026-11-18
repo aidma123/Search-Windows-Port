@@ -2,7 +2,11 @@
 // good. Up arrow widens to the parent, down arrow narrows back, Esc stops.
 // Toggled: running it again while picking stops picking.
 (function () {
-  var post = function (m) { try { window.chrome.webview.postMessage(m); } catch (e) {} };
+  var post = function (m) {
+    var s = JSON.stringify(m);
+    try { window.chrome.webview.postMessage(s); } catch (e) {}
+    try { window.webkit.messageHandlers.search.postMessage(s); } catch (e) {}
+  };
   if (window.__officeHider) { window.__officeHider.stop(); return 'off'; }
 
   var box = document.createElement('div');
