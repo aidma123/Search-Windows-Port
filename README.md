@@ -7,11 +7,28 @@ This is an unofficial port: Office Commun does not make or support it.
 A row of tabs, down the left or across the top, and the page. No toolbar, no start page,
 no account, no telemetry.
 
-## The engine
+## Two engines
 
-The Mac app uses WebKit because it ships with every Mac. The Windows equivalent is
-**Microsoft Edge WebView2**: the Chromium-based engine already installed on every Windows 10
-and 11 PC. Search doesn't bundle a browser engine of its own, so the app is a **~1.5 MB exe**.
+**WebKit**, the engine Search uses on the Mac, through WebKit's own Windows port
+(WinCairo, as built by Microsoft's Playwright project). This is the *WebKit build*:
+a zip with Search.exe and WebKit's files beside it (~65 MB zipped).
+
+**WebView2**, Microsoft Edge's Chromium engine, which every Windows 10 and 11 PC
+already has, so that build is a single ~1.5 MB exe.
+
+The WebKit build carries both, and you can switch between them in Settings › Memory.
+
+WebKit on Windows is a **prototype**:
+
+- **Security:** WebKit's Windows port is built for testing, not shipped in any browser.
+  It gets security fixes only when Playwright rebuilds it, and its sandboxing on
+  Windows is weaker than Edge's.
+- **Media:** some video sites may not play.
+- **Missing for now:**
+  - downloads
+  - find-on-page UI
+  - fullscreen video
+  - picture-in-picture
 
 ## Download
 
@@ -21,24 +38,31 @@ Get the builds from the **Actions** tab (artifact `Search-windows`), or from Rel
 |---|---|---|
 | `Search-win-x64.exe` / `Search-win-arm64.exe` | ~1.5 MB | [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) (Windows offers to install it the first time) |
 | `Search-win-x64-standalone.exe` / `…arm64-standalone.exe` | ~60 MB | nothing |
+| `Search-WebKit-win-x64.zip` | ~65 MB | .NET 8 Desktop Runtime; unzip and run Search.exe (WebKit engine, x64 only) |
 
 Both need WebView2, which Windows 10 and 11 already have. If it's missing, Search links to the installer.
 
 ## Memory
 
-Search is built to use as little RAM as a Chromium-based browser can:
+Search is built to use as little RAM as it can, whichever engine draws the pages.
 
-- **Tabs from your last session come back as addresses only.** Each one costs nothing until you click it.
-- **A tab you leave is told to use as little memory as it can** right away (`MemoryUsageTargetLevel.Low`).
-- **After 20 seconds in the background it is frozen** (`TrySuspendAsync`): no scripts, no timers, and memory is handed back to Windows where the engine can.
-- **After 10 minutes it sleeps.** The page is closed and the tab is only an address and a title until you click it.
-- Tabs playing sound are never frozen or put to sleep.
-- **Minimising the window freezes every page** and compacts the app's own memory.
-- **Same-site tabs share one page process** (`--process-per-site`).
-- **Lean engine mode is on by default.** Chromium's low-memory-device mode (`--enable-low-end-device-mode`) shrinks the engine's caches. Some gradients may band slightly; turn it off in Settings › Memory.
-- The app's own process uses workstation garbage collection with no background collection thread, and hands memory back rather than holding it.
+**Both engines:**
+- **Restored tabs cost nothing.** Tabs from your last session come back as addresses only until you click one.
+- **Background tabs are frozen after 20 seconds.** A tab you leave is told to use as little memory as it can, then frozen. With WebView2 that's `TrySuspendAsync`. With WebKit the page is taken out of the window and its timers are throttled.
+- **Idle tabs sleep after 10 minutes.** The page is closed and the tab is just an address until you click it.
+- **Tabs playing sound are left alone.**
+- **Minimising the window** freezes every page and compacts the app's own memory.
 
-All of these timings can be changed in Settings › Memory.
+**WebView2 only:**
+- **Same-site tabs share a process** (`--process-per-site`).
+- **Chromium's low-memory mode** (`--enable-low-end-device-mode`) is on by default. Turn it off in Settings › Memory if gradients look banded.
+
+**WebKit only:**
+- **No idle processes:** no prewarmed or cached spare processes.
+- **Small caches:** the smallest cache model, and no back-forward cache in lean mode.
+- **Optional shared process:** *all tabs of a space share one page process*. It uses the least memory, but one crash takes every tab down and sites aren't kept apart.
+
+**Measured, not guessed.** CI runs `Search.exe --bench` on a Windows machine for WebView2, WebKit, and WebKit with a shared process. Each run opens the same six sites and adds up the memory of every process the browser started. The results are in the job summary of the latest *Build* run.
 
 ## What carries over
 
@@ -59,7 +83,7 @@ All of these timings can be changed in Settings › Memory.
 | Copy clean link (tracking parameters removed) | ✓ | Ctrl+Alt+C |
 | History panel | ✓ | Ctrl+H |
 | Web Inspector and console | ✓ (Edge DevTools) | F12, Ctrl+Shift+I, Ctrl+Shift+J |
-| Chrome extensions from the Chrome Web Store | ✓ (WebView2 extension support; open the store page, then the puzzle button › Add) | |
+| Chrome extensions from the Chrome Web Store | ✓ see below | |
 | Passwords | ✓ saved by the engine, encrypted with your Windows account (not Windows Hello-gated) | |
 | Light, dark, or as the system is | ✓ | |
 | Default browser | ✓ Settings › This PC | |
@@ -70,6 +94,23 @@ All of these timings can be changed in Settings › Memory.
 the AI features, passkeys via Windows Hello, Translate, site styles, and the many smaller
 features in the Mac app's 117k lines. Extension popups open in a small window rather than
 anchored to a toolbar button.
+
+## Chrome extensions
+
+Open an extension's page in the Chrome Web Store, then use the puzzle button › *Add This Extension*. Or paste the link in Settings › Extensions, or load an unpacked folder.
+
+- **On WebView2,** extensions run in Edge's own extension support.
+- **On WebKit,** Search is the extension engine. The Mac app runs Chrome extensions on Safari's extension engine, but WebKit for Windows has none, so Search implements Chrome's extension API itself:
+  - **Its own origin:** each extension's files are served on a private loopback port (`http://127.0.0.1:port/`), standing in for `chrome-extension://id/`.
+  - **Background:** a hidden page stands in for the background service worker (`importScripts` works).
+  - **Content scripts** run in every page they match, with their CSS, at their `run_at` time.
+  - **APIs:** `runtime` (messages, ports, `onInstalled`), `storage` (local, sync, session, `onChanged`), `tabs`, `scripting`, `i18n`, `alarms`, `action` (badge, popup), `webNavigation`, `notifications`, `permissions`.
+  - **Network rules:** `declarativeNetRequest` static, dynamic and session rules are compiled to WebKit's content blocker, as Safari does. Redirect and header-changing rules are skipped.
+  - **Not yet:**
+    - `webRequest` blocking, which WebKit's API can't intercept. So classic uBlock Origin won't work; uBlock Origin Lite will.
+    - Showing context menus.
+    - `identity`, `offscreen` beyond a stub, and native messaging.
+  - **Known gap:** content scripts share the page's JavaScript world rather than an isolated one. The page can't reach `chrome.*`, but unlike in Chrome it can see the DOM changes and prototypes a content script touches.
 
 ## Where things are kept
 
@@ -89,4 +130,6 @@ macOS or Linux (`EnableWindowsTargeting`). It only runs on Windows.
 
 - `src/Search.Core`: platform-free logic (address parsing, search engines, the ad blocker,
   clean links, history, hidden elements, Chrome Web Store packages) plus the injected scripts. Unit tested.
-- `src/Search`: the WPF window, WebView2 wiring, panels, settings.
+- `src/Search`: the WPF window, panels, settings, and `Engines/` (the WebView2 engine, the WebKit engine through WebKit's C API, and the extension runtime host).
+
+`dotnet build` works anywhere. Running the WebKit engine needs WebKit's files beside the exe. CI downloads them; see `.github/workflows/build.yml`.
