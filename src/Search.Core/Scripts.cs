@@ -17,6 +17,8 @@ public static class Scripts
     static readonly Lazy<string> readerSheet = new(() => Read("reader.css"));
     public static readonly Lazy<string> Hider = new(() => Read("hider.js"));
     public static readonly Lazy<string> Float = new(() => Read("float.js"));
+    public static readonly Lazy<string> Transport = new(() => Read("transport.js"));
+    public static readonly Lazy<string> ExtensionApi = new(() => Read("ext-api.js"));
 
     /// Reading mode for the page, in `look` (light, dark or system).
     public static string Reader(string look) =>
