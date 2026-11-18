@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Test
+        run: dotnet test tests/Search.Core.Tests -c Release
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          foreach ($rid in "win-x64", "win-arm64") {
+            # Small: needs the .NET 8 Desktop Runtime (Windows offers to install it on first launch).
+            dotnet publish src/Search -c Release -r $rid --self-contained false `
+              -p:PublishSingleFile=true -o "out/$rid"
+            # Standalone: brings its own .NET, nothing else to install.
+            dotnet publish src/Search -c Release -r $rid --self-contained true `
+              -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o "out/$rid-standalone"
+            Rename-Item "out/$rid/Search.exe" "Search-$rid.exe"
+            Rename-Item "out/$rid-standalone/Search.exe" "Search-$rid-standalone.exe"
+          }
+          Get-ChildItem out -Recurse -Filter *.exe | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Search-windows
+          path: out/**/*.exe
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/**/*.exe
+          generate_release_notes: true
